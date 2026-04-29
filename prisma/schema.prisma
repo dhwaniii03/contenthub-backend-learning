@@ -1,0 +1,469 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+}
+
+enum TokenType {
+  PASSWORD_RESET
+}
+
+model User {
+  id           String  @id @default(uuid())
+  email        String  @unique @db.VarChar(255)
+  passwordHash String  @map("password_hash") @db.VarChar(255)
+  fullName     String? @map("full_name") @db.VarChar(255)
+  phoneNumber  String? @map("phone_number") @db.VarChar(20)
+
+  profilePictureId String? @map("profile_picture")
+  profilePicture   Media?  @relation("UserProfilePicture", fields: [profilePictureId], references: [id])
+
+  role              UserRole @default(admin)
+  isActive          Boolean  @default(true) @map("is_active")
+  is2FAEnabled           Boolean  @default(false) @map("is_2fa_enabled")
+  two_factor_secret      String?
+  two_factor_temp_secret String?
+  bio                    String?  @db.Text
+
+  // Notification Preferences
+  emailNotifications         Boolean @default(true) @map("email_notifications")
+  systemAlerts               Boolean @default(true) @map("system_alerts")
+  contentUpdateNotifications Boolean @default(true) @map("content_update_notifications")
+  platformAnnouncements      Boolean @default(true) @map("platform_announcements")
+
+  lastLogin     DateTime?      @map("last_login") @db.Timestamptz
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  tokens        Token[]
+  recoveryCodes RecoveryCode[]
+  sessions      Session[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+
+  // Authorship Tracking - Relations
+  createdCollections Collection[] @relation("CollectionCreatedBy")
+  updatedCollections Collection[] @relation("CollectionUpdatedBy")
+  createdLanguages   Language[]   @relation("LanguageCreatedBy")
+  updatedLanguages   Language[]   @relation("LanguageUpdatedBy")
+  createdMedia       Media[]      @relation("MediaCreatedBy")
+  updatedMedia       Media[]      @relation("MediaUpdatedBy")
+  createdMetadata    MetadataSchema[] @relation("MetadataSchemaCreatedBy")
+  updatedMetadata    MetadataSchema[] @relation("MetadataSchemaUpdatedBy")
+  createdContentTypes ContentType[] @relation("ContentTypeCreatedBy")
+  updatedContentTypes ContentType[] @relation("ContentTypeUpdatedBy")
+  createdContents    Content[]    @relation("ContentCreatedBy")
+  updatedContents    Content[]    @relation("ContentUpdatedBy")
+
+  updatedGlobalSettings GlobalSettings[]
+  createdSystemKeys     SystemKey[]      @relation("SystemKeyCreatedBy")
+  updatedSystemKeys     SystemKey[]      @relation("SystemKeyUpdatedBy")
+
+  @@map("users")
+}
+
+model RecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String
+  codeHash  String
+  isUsed    Boolean   @default(false)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Token {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  type      TokenType @default(PASSWORD_RESET)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("tokens")
+}
+
+model GlobalSettings {
+  id          Int      @id @default(1) // enforces single row
+  general     Json // siteName, contactEmail, logo, favicon
+  seo         Json // metaTitle, metaDescription, keywords
+  preferences Json // feature flags, toggles
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  updatedById String? @map("updated_by")
+  updatedBy   User?   @relation(fields: [updatedById], references: [id])
+
+  @@map("global_settings")
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum VisibilityType {
+  PUBLIC
+  PRIVATE
+}
+
+enum GeneralStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SortOrderType {
+  MANUAL
+  LATEST_FIRST
+}
+
+enum SystemKeyType {
+  TEXT
+  ERROR
+  MEDIA
+}
+
+// --- Collections ---
+
+model Collection {
+  id          String @id @default(uuid())
+  title       Json // JSONB: { "en": "Short Films", "ar": "أفلام قصيرة" }
+  description Json? // JSONB: optional multilingual description
+  slug        String @unique @db.VarChar(255)
+
+  thumbnailId String? @map("thumbnail_id")
+  thumbnail   Media?  @relation("CollectionThumbnail", fields: [thumbnailId], references: [id])
+
+  bannerId String? @map("banner_id")
+  banner   Media?  @relation("CollectionBanner", fields: [bannerId], references: [id])
+
+  visibility VisibilityType @default(PUBLIC)
+  status     GeneralStatus  @default(ACTIVE)
+  isFeatured Boolean        @default(false) @map("is_featured")
+  sortOrder  SortOrderType  @default(MANUAL) @map("sort_order")
+  isDeleted  Boolean        @default(false) @map("is_deleted")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdById String? @map("created_by")
+  createdBy   User?   @relation("CollectionCreatedBy", fields: [createdById], references: [id])
+  updatedById String? @map("updated_by")
+  updatedBy   User?   @relation("CollectionUpdatedBy", fields: [updatedById], references: [id])
+
+  contents CollectionContent[]
+
+  @@index([status])
+  @@index([visibility])
+  @@index([sortOrder])
+  @@index([isDeleted])
+  @@map("collections")
+}
+
+model Language {
+  id           String  @id @default(uuid())
+  languageCode String  @unique @map("language_code") // "en", "hi", "zh"
+  languageName String  @map("language_name") // "English", "Hindi"
+  countryCode  String  @map("country_code") // "US", "IN", "CN"
+  isDefault    Boolean @default(false) @map("is_default")
+  isActive     Boolean @default(true) @map("is_active")
+  isRTL        Boolean @default(false) @map("is_rtl") // Arabic, Urdu
+  sortOrder    Int     @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdById String? @map("created_by")
+  createdBy   User?   @relation("LanguageCreatedBy", fields: [createdById], references: [id])
+  updatedById String? @map("updated_by")
+  updatedBy   User?   @relation("LanguageUpdatedBy", fields: [updatedById], references: [id])
+
+  systemTranslations SystemTranslation[]
+
+  @@map("languages")
+}
+
+// --- System Texts (UI, Pages, Components) ---
+
+model SystemKey {
+  id          String        @id @default(uuid())
+  name        String        @unique @map("key_name") // e.g., "WELCOME_TITLE"
+  pageNameId  String?       @map("page_name_id")
+  page        PageName?     @relation(fields: [pageNameId], references: [id])
+  type        SystemKeyType @default(TEXT)
+  description String?       @db.Text
+
+  mediaId      String? @map("media_id")
+  media        Media?  @relation("SystemKeyMedia", fields: [mediaId], references: [id])
+  isPredefined Boolean @default(false) @map("is_predefined")
+  isDeleted    Boolean @default(false) @map("is_deleted")
+
+  translations SystemTranslation[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdById String? @map("created_by")
+  createdBy   User?   @relation("SystemKeyCreatedBy", fields: [createdById], references: [id])
+  updatedById String? @map("updated_by")
+  updatedBy   User?   @relation("SystemKeyUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([pageNameId])
+  @@index([pageNameId, name])
+  @@index([isDeleted])
+  @@map("system_keys")
+}
+
+model SystemTranslation {
+  id           String @id @default(uuid())
+  keyId        String @map("key_id")
+  languageCode String @map("language_code") @db.VarChar(10)
+
+  content      String?       @db.Text // The LIVE published content
+  draftContent String?       @db.Text // The working DRAFT version
+  status       ContentStatus @default(DRAFT)
+  version      Int           @default(1)
+
+  key      SystemKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  language Language  @relation(fields: [languageCode], references: [languageCode], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([keyId, languageCode])
+  @@index([languageCode])
+  @@map("system_translations")
+}
+
+model Media {
+  id              String   @id @default(uuid())
+  name            String   @db.VarChar(255) // Custom name set by the user
+  fileName        String   @map("file_name") @db.VarChar(255) // Physical name on disk
+  alternativeText String?  @map("alternative_text") @db.VarChar(255)
+  caption         String?  @db.VarChar(255)
+  fileType        String?  @db.VarChar(255)
+  ext             String   @db.VarChar(50)
+  mime            String   @db.VarChar(100)
+  size            Float
+  url             String   @unique @db.VarChar(500)
+  tags            String[] @default([]) // Array of strings for categorization
+  isDeleted       Boolean  @default(false) @map("is_deleted")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdById String? @map("created_by")
+  createdBy   User?   @relation("MediaCreatedBy", fields: [createdById], references: [id])
+  updatedById String? @map("updated_by")
+  updatedBy   User?   @relation("MediaUpdatedBy", fields: [updatedById], references: [id])
+
+  thumbnailCollections Collection[] @relation("CollectionThumbnail")
+  bannerCollections    Collection[] @relation("CollectionBanner")
+  userProfiles         User[]       @relation("UserProfilePicture")
+  systemKeys           SystemKey[]  @relation("SystemKeyMedia")
+
+  @@index([isDeleted])
+  @@index([fileType])
+  @@map("media")
+}
+
+model MetadataSchema {
+  id         String @id @default(uuid())
+  title      String @unique @db.VarChar(255)
+  slug       String @unique @db.VarChar(255) // Auto-generated from title
+  schemaType String @map("schema_type") @db.VarChar(100) // Input field type from UI
+
+  schema    Json // Structured array of fields with validation rules
+  seoSchema Json? @map("seo_schema")
+
+  version   Int           @default(1)
+  status    GeneralStatus @default(ACTIVE)
+  isDeleted Boolean       @default(false) @map("is_deleted")
+
+  contentTypes ContentType[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdById String? @map("created_by")
+  createdBy   User?   @relation("MetadataSchemaCreatedBy", fields: [createdById], references: [id])
+  updatedById String? @map("updated_by")
+  updatedBy   User?   @relation("MetadataSchemaUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([status])
+  @@index([isDeleted])
+  @@map("metadata_schemas")
+}
+
+model ContentType {
+  id          String        @id @default(uuid())
+  name        String        @unique @db.VarChar(255)
+  key         String        @unique @db.VarChar(255)
+  slug        String        @unique @db.VarChar(255)
+  description String?       @db.Text
+  status      GeneralStatus
+
+  isDeleted        Boolean @default(false) @map("is_deleted")
+  isEnabledContent Boolean @default(true) @map("is_enabled_content")
+  allowMediaUpload Boolean @default(true) @map("allow_media_upload")
+  allowTags        Boolean @default(true) @map("allow_tags")
+
+  metadataSchemaId String?         @map("metadata_schema_id")
+  metadataSchema   MetadataSchema? @relation(fields: [metadataSchemaId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdById String? @map("created_by")
+  createdBy   User?   @relation("ContentTypeCreatedBy", fields: [createdById], references: [id])
+  updatedById String? @map("updated_by")
+  updatedBy   User?   @relation("ContentTypeUpdatedBy", fields: [updatedById], references: [id])
+
+  contents Content[]
+
+  @@index([status])
+  @@index([isDeleted])
+  @@map("content_types")
+}
+
+model Content {
+  id        String  @id @default(uuid())
+  ownerType String  @default("admin") @map("owner_type") @db.VarChar(50)
+  ownerId   String? @map("owner_id")
+
+  contentTypeId String      @map("content_type_id")
+  contentType   ContentType @relation(fields: [contentTypeId], references: [id])
+
+  // Many-to-Many relationship
+  collections CollectionContent[]
+
+  // Headless JSON Container
+  // Structure: { fields: { title: { en: ".." }, ... }, media: [{ "hero": "uuid1" }, { "gallery": ["id2"] }] }
+  content Json
+  slug    String @unique @db.VarChar(255)
+
+  tags       String[]       @default([])
+  visibility VisibilityType @default(PUBLIC)
+  status     ContentStatus  @default(DRAFT)
+  isDeleted  Boolean        @default(false) @map("is_deleted")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdById String? @map("created_by")
+  createdBy   User?   @relation("ContentCreatedBy", fields: [createdById], references: [id])
+    updatedById String? @map("updated_by")
+  updatedBy   User?   @relation("ContentUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([contentTypeId])
+  @@index([status])
+  @@index([visibility])
+  @@index([isDeleted])
+  @@map("contents")
+}
+
+model CollectionContent {
+  id           String     @id @default(uuid())
+  collectionId String     @map("collection_id")
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  contentId    String     @map("content_id")
+  content      Content    @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([collectionId, contentId])
+  @@index([collectionId, sortOrder])
+  @@index([contentId])
+  @@map("collection_contents")
+}
+
+model PageName {
+  id       String @id @default(uuid())
+  pageName String @unique @map("page_name")
+
+  systemKeys SystemKey[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("page_names")
+}
+
+model Session {
+  id      String @id @default(uuid())
+  userId  String @map("user_id")
+  tokenId String @unique @map("token_id") // JTI (access token session ID)
+
+  refreshTokenHash String @map("refresh_token_hash") // SHA-256 hash of refresh token
+
+  device    String? @db.VarChar(255)
+  browser   String? @db.VarChar(255)
+  os        String? @db.VarChar(255)
+  ipAddress String? @map("ip_address") @db.VarChar(45)
+
+  isActive     Boolean   @default(true) @map("is_active")
+  lastActiveAt DateTime  @default(now()) @map("last_active_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  expiresAt    DateTime? @map("expires_at") @db.Timestamptz // access token expiry
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  sessionId   String?  @map("session_id")
+  action      String
+  module      String?
+  entityType  String?  @map("entity_type")
+  entityId    String?  @map("entity_id")
+  description String?
+  changes     Json?
+  metadata    Json?
+  ipAddress   String?  @map("ip_address") @db.VarChar(45)
+  userAgent   String?  @map("user_agent")
+  status      String   @default("SUCCESS")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  type        String   // e.g., "CREATION", "DELETION", "SECURITY"
+  module      String   // e.g., "CONTENT", "COLLECTION", "AUTH"
+  title       String
+  message     String
+  data        Json?    // Optional context (entity IDs, slug, etc.)
+  isRead      Boolean  @default(false) @map("is_read")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
